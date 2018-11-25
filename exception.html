@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <link rel="shortcut icon" href="/charlotte-favicon.ico" type="image/x-icon">
+    <link rel="icon" href="/charlotte-favicon.ico" type="image/x-icon">
+    <link href="https://fonts.googleapis.com/css?family=Abril+Fatface|Roboto:300,700" rel="stylesheet">
+    <title>Charlotte Exception</title>
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            padding: 0;
+            margin: 0;
+        }
+
+        header {
+            padding: 1em;
+            background-color: #ffffcc;
+        }
+
+        header h3 {
+            color: gray;
+        }
+
+        header ul {
+            list-style: none;
+        }
+
+        header ul li {
+            display: flex;
+            align-items: center;
+        }
+
+        header ul li span:first-of-type {
+            color: gray;
+            font-weight: bold;
+            width: 200px;
+            text-align: right
+        }
+
+        header ul li span:last-of-type {
+            padding-left: 14px;
+        }
+
+        section {
+            padding: 1em;
+            background-color: #eeeeee;
+        }
+
+        section ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        section ul li {
+            display: flex;
+            flex-flow: column;
+        }
+
+        section ul li h5 {
+            color: #ada7a7;
+            margin-bottom: 0;
+            font-size: 14px;
+        }
+
+        section ul li p {
+            background-color: #dfdfdf;
+            color: #5a616e;
+            margin-left: 4em;
+            font-size: 14px;
+        }
+
+        section ul li p span:last-of-type {
+            padding-left: 2em;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>${exceptionTitle}</h1>
+        <h3>${exceptionMessage}</h3>
+        <ul>
+            <li><span>Request Method:</span> <span>${requestMethod}</span></li>
+            <li><span>Request URL:</span> <span>${requestUrl}</span></li>
+            <li><span>Exception Type:</span> <span>${exceptionType}</span></li>
+            <li><span>Exception Value:</span> <span>${exceptionValue}</span></li>
+            <li><span>Exception Location:</span> <span>${exceptionLocation}</span></li>
+            <li><span>Node Executable:</span> <span>${nodeExecutable}</span></li>
+            <li><span>Node Version:</span> <span>${nodeVersion}</span></li>
+            <li><span>Server Time:</span> <span>${serverTime}</span></li>
+        </ul>
+    </header>
+
+    <section>
+        <h2>Traceback</h2>
+        <ul>${tracebackList}</ul>
+    </section>
+</body>
+</html>

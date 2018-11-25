@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Charlotte Error Tracking</title>
+    <link rel="shortcut icon" href="/charlotte-favicon.ico" type="image/x-icon">
+    <link rel="icon" href="/charlotte-favicon.ico" type="image/x-icon">
+    <link href="https://fonts.googleapis.com/css?family=Abril+Fatface|Roboto:300,700" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.7.2/css/bulma.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            font-weight: 300;
+            background-color: #ff3627;
+        }
+
+        h1, h2, h3, h4, h5, h6 {
+            font-family: 'Abril Fatface', serif;
+        }
+
+        .navbar-item img {
+            height: 48px;
+            max-height: 48px;
+        }
+
+        .is-red {
+            background-color: #ff3627;
+            color: #ffffff;
+        }
+
+        .title {
+            font-weight: 300;
+        }
+
+        .is-1 {
+            color: #ffffff;
+        }
+
+        div.section {
+            min-height: 100vh;
+        }
+
+        .trace-type {
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+
+        .trace-location {
+            color: gray;
+            margin-left: 8px;
+        }
+
+        .stacktrace {
+            margin-top: 1.5em;
+            padding: 1em;
+            background-color: #eeeeee;
+        }
+
+        .stacktrace li h5 {
+            color: #ada7a7;
+        }
+
+        .stacktrace li p {
+            background-color: #dfdfdf;
+            color: #5a616e;
+            margin-left: 4em;
+            padding-left: 8px;
+            padding-right: 8px;
+        }
+
+        .stacktrace li p span:last-of-type {
+            padding-left: 2em;
+        }
+
+        .stacktrace li {
+            margin-bottom: 1em;
+        }
+
+        .info {
+            padding-bottom: 1em;
+            display: flex;
+            align-items: center;
+        }
+
+        .info span:first-of-type {
+            width: 200px;
+            text-align: left;
+        }
+
+        .info span:last-of-type {
+            background-color: #eeeeee;
+            padding: .5em;
+            width: 100%;
+        }
+
+        h4 small {
+            margin-left: 8px;
+            color: gray;
+        }
+    </style>
+</head>
+<body>
+    <nav style="height: 64px" class="navbar is-white" role="navigation" aria-label="main navigation">
+        <div class="navbar-brand navbar-end">
+            <a class="navbar-item" href="https://github.com/EliasBF/charlotte">
+                <img src="https://i.imgur.com/PCUho8o.png" alt="Charlotte: Error tracking middleware for koa">
+            </a>
+        </div>
+    </nav>
+    <div class="section">
+        <div id="app" class="container is-fluid">
+            <router-view></router-view>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="content has-text-centered">
+            <p>
+                <strong>Charlotte</strong> by <a href="https://eliashbf.com">Elias Becerra</a>. The source code is licensed
+                <a href="http://opensource.org/licenses/mit-license.php">MIT</a>. The website content
+                is licensed <a href="http://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY NC SA 4.0</a>.
+            </p>
+        </div>
+    </footer>
+
+    <script src="https://unpkg.com/vue/dist/vue.js"></script>
+    <script src="https://unpkg.com/vue-router/dist/vue-router.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script>
+        const store = {
+            state: {
+                loading: false,
+                tracebacks: [],
+                selected: null,
+                after: null
+            },
+            startLoadingAction () {
+                console.log('START LOADING')
+                this.state.loading = true
+            },
+            stopLoadingAction () {
+                console.log('STOP LOADING')
+                this.state.loading = false
+            },
+            setTracebacksAction (tracebacks) {
+                console.log('SET TRACEBACKS')
+                this.state.tracebacks = [...this.state.tracebacks, ...tracebacks]
+
+                if (tracebacks.length > 0) {
+                    this.after = tracebacks[tracebacks.length - 1].created_at
+                }
+            },
+            showTracebackItemAction (traceback) {
+                console.log('SHOW TRACEBACK ITEM')
+                this.state.selected = traceback
+            },
+            hideTracebackItemAction () {
+                console.log('HIDE TRACEBACK ITEM')
+                this.state.selected = null
+            }
+        }
+
+        const Loader = Vue.component('loader', {
+            template: `
+                <div class="columns">
+                    <div class="column is-three-fifths is-offset-one-fifth">
+                        <div class="box">
+                            <h3 class="subtitle is-3 has-text-centered">Loading...</h3>
+                        </div>
+                    </div>
+                </div>
+            `
+        })
+
+        const TracebackItem = Vue.component('traceback-item', {
+            data: function () {
+                return store.state
+            },
+            methods: {
+                goBack: function () {
+                    router.go(-1)
+                    store.hideTracebackItemAction()
+                }
+            },
+            template: `
+                <loader v-if="loading"></loader>
+                <div v-else>
+                    <div class="columns">
+                        <div class="column is-11">
+                            <div class="box">
+                                <div class="level">
+                                    <div class="level-left">
+                                        <div class="level-item">
+                                            <button v-on:click="goBack" class="button is-red">BACK</button>
+                                        </div>
+                                        <div class="level-item">
+                                            <h4 class="title is-4">{{ selected.type }} <small>in {{ selected.file_location }}</small></h4>
+                                        </div>
+                                    </div>
+                                    <div class="level-right">
+                                        <div class="level-item">
+                                            <h4 class="title is-4">{{ selected.registered_at }}</h4>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="card">
+                                    <div class="card-content">
+                                        <h5 class="title is-5">MESSAGE</h5>
+                                        <p>{{ selected.message }}</p>
+                                    </div>
+                                </div>
+
+                                <div class="card">
+                                    <div class="card-content">
+                                        <h5 class="title is-5">ERROR</h5>
+                                        <p>{{ selected.type }} {{ selected.message }}</p>
+
+                                        <ul class="stacktrace">
+                                            <li v-for="stack in selected.stacktrace">
+                                                <h5>{{ stack.file_name }} in {{ stack.function_name || 'Anonymous function' }}</h5>
+                                                <p>
+                                                    <span>Ln {{ stack.line_number }}, Col {{ stack.column_number }}.</span>
+                                                    <span>{{ stack.source }}</span>
+                                                </p>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+
+                                <div class="card">
+                                    <div class="card-content">
+                                        <h5 class="title is-5">REQUEST</h5>
+                                        
+                                        <p class="info">
+                                            <span>Request Url:</span> 
+                                            <span>{{ selected.request.url }}</span>
+                                        </p>
+                                        <p class="info">
+                                            <span>Request Method:</span> 
+                                            <span>{{ selected.request.method }}</span>
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div class="card">
+                                    <div class="card-content">
+                                        <h5 class="title is-5">ADDITIONAL DATA</h5>
+                                        
+                                        <p class="info">
+                                            <span>Params:</span> 
+                                            <span>{{ selected.request.params || '{}' }}</span>
+                                        </p>
+                                        <p class="info">
+                                            <span>Query:</span> 
+                                            <span>{{ selected.request.query || '{}' }}</span>
+                                        </p>
+                                        <p class="info">
+                                            <span>Body:</span> 
+                                            <span>{{ selected.request.body || '{}' }}</span>
+                                        </p>
+                                        <p class="info">
+                                            <span>Node:</span> 
+                                            <span>{{ selected.node }}</span>
+                                        </p>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `
+        })
+
+        const TracebackList = Vue.component('traceback-list', {
+            data: function () {
+                return store.state
+            },
+            methods: {
+                showTraceback: function (traceback) {
+                    router.push('/traceback')
+                    store.startLoadingAction()
+
+                    axios.get('/charlotte/traceback/' + traceback.id)
+                    .then((res) => {
+                        setTimeout(() => {
+                            store.showTracebackItemAction({
+                                ...traceback,
+                                node: JSON.stringify({
+                                    executable: traceback.node_executable,
+                                    version: traceback.node_version
+                                }),
+                                stacktrace: res.data.stacktrace,
+                                request: res.data.request
+                            })
+                            store.stopLoadingAction()
+                        }, 3000)
+                    })
+                    .catch((err) => {
+                        console.log(err)
+                    })
+                }
+            },
+            template: `
+                <loader v-if="loading"></loader>
+                <div v-else>
+                    <h1 class="title is-1">Registered traceback error</h1>
+                    
+                    <div class="columns" v-if="tracebacks.length === 0">
+                        <div class="column is-three-fifths">
+                            <div class="box">
+                                <h4 class="title is-4">No traces have been recorded</h4>
+                                <h4 class="subtitle is-4">Everything is fine, no need to be alarmed</h4>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="columns" v-if="tracebacks.length > 0">
+                        <div class="column is-9">
+                            <div class="box">
+                                <table class="table is-fullwidth is-hoverable">
+                                    <thead>
+                                        <tr>
+                                            <th>TRACEBACK</th>
+                                            <th>REGISTERED AT</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr
+                                            v-for="traceback in tracebacks"
+                                            v-on:click="showTraceback(traceback)">
+                                            <td>
+                                                <p>
+                                                    <span class="trace-type">{{ traceback.type }}</span>
+                                                    <span class="trace-location">{{ traceback.file_location }}</span>
+                                                </p>
+                                                <p>{{ traceback.message }}</p>
+                                            </td>
+                                            <td style="vertical-align: middle;">{{ traceback.registered_at }}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+
+                                <button v-if="tracebacks.length === 10" class="button is-large is-fullwidth is-red">LOAD MORE</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `,
+        })
+
+        const router = new VueRouter({
+            routes: [
+                { path: '/', component: TracebackList },
+                { path: '/traceback', component: TracebackItem }
+            ],
+        })
+
+        const app = new Vue({
+            el: '#app',
+            router: router,
+            created: function () {
+                if (router.currentRoute.path !== '/') {
+                    router.push('/')
+                }
+
+                store.startLoadingAction()
+
+                axios.get('/charlotte/traceback')
+                .then((res) => {
+                    setTimeout(() => {
+                        store.setTracebacksAction(res.data.tracebacks)
+                        store.stopLoadingAction()
+                    }, 3000)
+                })
+                .catch((err) => {
+                    console.log(err)
+                })
+            }
+        })
+    </script>
+</body>
+</html>
