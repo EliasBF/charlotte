@@ -11,9 +11,14 @@
   "dependencies": {
     "better-sqlite3": "^5.0.1",
     "chalk": "^2.4.1",
+    "email-validator": "^2.0.4",
     "error-stack-parser": "^2.0.2",
+    "html-to-text": "^5.1.1",
+    "is-function": "^1.0.1",
+    "is-object": "^1.0.1",
     "koa": "^2.6.1",
     "moment": "^2.22.2",
+    "nodemailer": "^6.1.1",
     "path-to-regexp": "^2.4.0",
     "route-parser": "0.0.5"
   }

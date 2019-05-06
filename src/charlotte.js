@@ -1,12 +1,14 @@
-const fs = require('fs')
 const path = require('path')
-const { promisify } = require('util')
-
 const chalk = require('chalk')
 const moment = require('moment')
 const pathToRegexp = require('path-to-regexp')
 const Database = require('better-sqlite3')
 const ErrorStackParser = require('error-stack-parser')
+const isObject = require('is-object')
+const isFunction = require('is-function')
+const htmlToText = require('html-to-text')
+const { renderTemplate, openFile } = require('./templates')
+const { sendLogEmail } = require('./mail')
 
 module.exports = class Charlotte {
 
@@ -15,26 +17,77 @@ module.exports = class Charlotte {
         this.end = null
         this.koaContext = null
 
-        // this.templateFilePath = path.join(require.resolve('charlotte'), 'exception.html')
-        this.templateFilePath = path.join(process.cwd(), 'exception.html')
-        // this.appBaseDirectory = path.join(require.resolve('charlotte'), 'app')
-        this.appBaseDirectory = path.join(process.cwd(), 'app')
-        this.readFile = promisify(fs.readFile)
+        this.mail = {
+            host: null,
+            port: null,
+            user: null,
+            pass: null,
+            from: null,
+            to: null
+        }
 
+        // this.viewsPath = path.join(require.resolve('charlotte'), 'views')
+        // this.appPath = path.join(require.resolve('charlotte'), 'app')
+        this.viewsPath = path.join(process.cwd(), 'views')
+        this.appPath = path.join(process.cwd(), 'app')
+        
+        this.createRoutes()
+        this.prepareStorage()
+    }
+
+    startLog (time) {
+        this.start = time || Date.now()
+    }
+
+    endLog (time) {
+        this.end = time || Date.now()
+    }
+
+    context (ctx) {
+        this.koaContext = ctx
+    }
+
+    createRoutes () {
         this.routes = [
             { matcher: pathToRegexp('/charlotte'), handler: this.index },
             { matcher: pathToRegexp('/charlotte/traceback'), handler: this.tracebackList },
             { matcher: pathToRegexp('/charlotte/traceback/:id'), handler: this.tracebackInfo },
             { matcher: pathToRegexp('/charlotte-favicon.ico'), handler: this.icon }
         ]
-
-        this.storage = new Database('charlotte.db')
-        this.initStorage()
     }
 
-    // Sqlite
+    prepareMailing (config, callback) {
+        if (!config && !callback) {
+            this.mail = null
+            return 
+        }
 
-    initStorage () {
+        if (callback && isFunction(callback)) {
+            this.onMail = (traceback) => callback(traceback)
+            return
+        }
+
+        if (!isObject(config)) {
+            throw new Error('Invalid config for mailing')
+        }
+
+        if (!('host' in config) ||
+            !('user' in config) ||
+            !('pass' in config) ||
+            !('to' in config)) {
+            throw new Error('Invalid config for mailing')
+        }
+        
+        this.mail = {
+            ...config,
+            from: config.from || 'Charlotte <bot@charlotte.io>',
+            port: config.port || 587
+        }
+    }
+
+    prepareStorage () {
+        this.storage = new Database('charlotte.db')
+
         this.storage.exec(`
             CREATE TABLE IF NOT EXISTS traceback (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,8 +121,6 @@ module.exports = class Charlotte {
             )
         `)
     }
-
-    // Koa request logging
 
     log () {
         const logLevel = this.logLevel()
@@ -106,8 +157,6 @@ module.exports = class Charlotte {
         return this.colorize(logLevel, logMessage)
     }
 
-    // Exception view
-
     renderStackTrace (traceback) {
         return traceback.map(trace => `
             <li>
@@ -124,45 +173,28 @@ module.exports = class Charlotte {
 
     async renderException (exception) {
         const exceptionTraceItems = ErrorStackParser.parse(exception)
-        const templateContent = await this.readFile(this.templateFilePath)
-        const compile =  (content, $ = '$') => Function($, 'return `' + content + '`;')
 
-        return compile(templateContent.toString(), [
-            'exceptionTitle',
-            'exceptionMessage',
-            'requestMethod',
-            'requestUrl',
-            'exceptionType',
-            'exceptionValue',
-            'exceptionLocation',
-            'nodeExecutable',
-            'nodeVersion',
-            'serverTime',
-            'tracebackList'
-        ])(
-            `${exception.name} at ${this.koaContext.path}`,
-            exception.message,
-            this.koaContext.method.toUpperCase(),
-            this.koaContext.href,
-            exception.name,
-            exception.message,
-            exceptionTraceItems[0]['fileName'],
-            process.execPath,
-            process.version,
-            new Date().toGMTString(),
-            this.renderStackTrace(exceptionTraceItems)
-        )
+        return await renderTemplate(path.join(this.viewsPath, 'exception.html'), {
+            'exceptionTitle': `${exception.name} at ${this.koaContext.path}`,
+            'exceptionMessage': exception.message,
+            'requestMethod': this.koaContext.method.toUpperCase(),
+            'requestUrl': this.koaContext.href,
+            'exceptionType': exception.name,
+            'exceptionValue': exception.message,
+            'exceptionLocation': exceptionTraceItems[0]['fileName'],
+            'nodeExecutable': process.execPath,
+            'nodeVersion': process.version,
+            'serverTime': new Date().toGMTString(),
+            'tracebackList': this.renderStackTrace(exceptionTraceItems)
+        })
     }
-
-    // Route Handling
 
     matchRoute(path) {
         return this.routes.find(route => route.matcher.test(path))
     }
 
     async index () {
-        const app = await this.readFile(path.join(this.appBaseDirectory, 'index.html'))
-        this.koaContext.body = app.toString()
+        this.koaContext.body = await renderTemplate(path.join(this.appPath, 'index.html'))
     }
 
     async tracebackList () {
@@ -212,14 +244,23 @@ module.exports = class Charlotte {
     }
 
     async icon () {
-        const icon = await this.readFile(path.join(this.appBaseDirectory, 'favicon.ico'))
+        const icon = await openFile(path.join(this.appPath, 'favicon.ico'))
         this.koaContext.body = icon
     }
 
-    // Tracking
-
     addTraceback (exception) {
         const exceptionTraceItems = ErrorStackParser.parse(exception)
+
+        const traceback = {
+            type: exception.name,
+            message: exception.message,
+            file_location: exceptionTraceItems[0]['fileName'],
+            node_executable: process.execPath,
+            node_version: process.version,
+            created_at: new Date().getTime(),
+            fixed_at: null,
+            ignored_at: null
+        }
 
         const stmtTrace = this.storage.prepare(`
         INSERT INTO traceback (
@@ -230,20 +271,22 @@ module.exports = class Charlotte {
             :node_version, :created_at, :fixed_at, :ignored_at
         )`)
 
-        const resultTrace = stmtTrace.run({
-            type: exception.name,
-            message: exception.message,
-            file_location: exceptionTraceItems[0]['fileName'],
-            node_executable: process.execPath,
-            node_version: process.version,
-            created_at: new Date().getTime(),
-            fixed_at: null,
-            ignored_at: null
-        })
+        const resultTrace = stmtTrace.run(traceback)
 
-        const traceId = resultTrace.lastInsertRowid
+        traceback.id = resultTrace.lastInsertRowid
+        traceback.stack = []
 
         exceptionTraceItems.forEach(trace => {
+            const traceInfo = {
+                file_name: trace.fileName,
+                function_name: trace.functionName || 'Anonymous function',
+                line_number: trace.lineNumber,
+                column_number: trace.columnNumber,
+                source: trace.source,
+                created_at: new Date().getTime(),
+                traceback_id: traceback.id
+            }
+
             const stmtStack = this.storage.prepare(`
             INSERT INTO stacktrace (
                 file_name, function_name, line_number,
@@ -254,15 +297,8 @@ module.exports = class Charlotte {
             )
             `)
 
-            stmtStack.run({
-                file_name: trace.fileName,
-                function_name: trace.functionName || 'Anonymous function',
-                line_number: trace.lineNumber,
-                column_number: trace.columnNumber,
-                source: trace.source,
-                created_at: new Date().getTime(),
-                traceback_id: traceId
-            })
+            stmtStack.run(traceInfo)
+            traceback.stack.push(traceInfo)
         })
 
         const stmtRequest = this.storage.prepare(`
@@ -273,13 +309,26 @@ module.exports = class Charlotte {
         )
         `)
 
-        stmtRequest.run({
+        traceback.request = {
             method: this.koaContext.method.toUpperCase(),
             url: this.koaContext.href,
             params: JSON.stringify(this.koaContext.params),
             query: JSON.stringify(this.koaContext.query),
             body: JSON.stringify(this.koaContext.body),
-            traceback_id: traceId
-        })
+            traceback_id: traceback.id
+        }
+
+        stmtRequest.run(traceback.request)
+
+        if (this.mail) {
+            this.onMail(traceback)
+        }
+    }
+
+    onMail (traceback, content) {
+        this.mail.subject = `${traceback.type} at ${this.koaContext.path}`
+        this.mail.html = content
+        this.mail.plain = htmlToText.fromString(context)
+        sendLogEmail(this.mail)
     }
 }

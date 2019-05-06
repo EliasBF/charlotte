@@ -1,12 +1,13 @@
-const Charlotte = require('./charlotte')
+const Charlotte = require('./src/charlotte')
 
-module.exports = () => {
-    const charlotte = new Charlotte()
+module.exports = (options) => {
     process.env.NODE_ENV = process.env.NODE_ENV || 'development'
+    const charlotte = new Charlotte()
+    charlotte.prepareMailing(options.mail, options.onMail)
 
     return async function charlotteMiddleware (ctx, next) {
-        charlotte.start = Date.now()
-        charlotte.koaContext = ctx
+        charlotte.startLog()
+        charlotte.context(ctx)
 
         try {
             const route = charlotte.matchRoute(ctx.path)
@@ -18,7 +19,7 @@ module.exports = () => {
                 await next()
             }
 
-            charlotte.end = Date.now()
+            charlotte.endLog()
             charlotte.log()
         }
         catch (err) {
@@ -29,7 +30,7 @@ module.exports = () => {
                 ctx.body = await charlotte.renderException(err)
             }
             
-            charlotte.end = Date.now()
+            charlotte.endLog()
             charlotte.log()
 
             // in production rethrow for custom error handling
