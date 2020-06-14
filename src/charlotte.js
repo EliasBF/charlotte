@@ -2,13 +2,13 @@ const path = require('path')
 const chalk = require('chalk')
 const moment = require('moment')
 const pathToRegexp = require('path-to-regexp')
-const Database = require('better-sqlite3')
 const ErrorStackParser = require('error-stack-parser')
 const isObject = require('is-object')
 const isFunction = require('is-function')
 const htmlToText = require('html-to-text')
 const { renderTemplate, openFile } = require('./templates')
 const { sendLogEmail } = require('./mail')
+const createStorage = require('./storage')
 
 module.exports = class Charlotte {
 
@@ -32,7 +32,6 @@ module.exports = class Charlotte {
         this.appPath = path.join(process.cwd(), 'app')
         
         this.createRoutes()
-        this.prepareStorage()
     }
 
     startLog (time) {
@@ -85,41 +84,12 @@ module.exports = class Charlotte {
         }
     }
 
-    prepareStorage () {
-        this.storage = new Database('charlotte.db')
+    prepareStorage (options) {
+        if (!options.dialect) {
+            throw new Error('storage dialect is not specified')
+        }
+        this.storage = createStorage(options)
 
-        this.storage.exec(`
-            CREATE TABLE IF NOT EXISTS traceback (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                type TEXT NOT NULL,
-                message TEXT NOT NULL,
-                file_location TEXT NOT NULL,
-                node_executable TEXT NOT NULL,
-                node_version TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                fixed_at INTEGER NULL,
-                ignored_at INTEGER NULL
-            );
-            CREATE TABLE IF NOT EXISTS stacktrace (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                file_name TEXT NULL,
-                function_name TEXT NULL,
-                line_number INTEGER NULL,
-                column_number INTEGER NULL,
-                source INTEGER NULL,
-                created_at INTEGER NOT NULL,
-                traceback_id INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS request (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                method TEXT NOT NULL,
-                url TEXT NOT NULL,
-                params TEXT NULL,
-                query TEXT NULL,
-                body TEXT NULL,
-                traceback_id INTEGER NOT NULL
-            )
-        `)
     }
 
     log () {
@@ -199,8 +169,7 @@ module.exports = class Charlotte {
 
     async tracebackList () {
         try {
-            const stmt = this.storage.prepare('SELECT * FROM traceback ORDER BY created_at DESC LIMIT 10')
-            const tracebacks = stmt.all()
+            const tracebacks = this.storage.tracebackList()
 
             this.koaContext.body = {
                 tracebacks: tracebacks.map(trace => {
@@ -220,12 +189,8 @@ module.exports = class Charlotte {
     async tracebackInfo () {
         try {
             const traceback_id = Number(this.koaContext.url.split('/').pop())
-
-            const stmtStack = this.storage.prepare('SELECT * FROM stacktrace WHERE traceback_id = :traceback_id')
-            const stacktrace = stmtStack.all({ traceback_id })
-
-            const stmtRequest = this.storage.prepare('SELECT * FROM request WHERE traceback_id = :traceback_id')
-            const request = stmtRequest.get({ traceback_id })
+            const stacktrace = this.storage.stacktrace(traceback_id)
+            const request = this.storage.request(traceback_id)
 
             this.koaContext.body = {
                 stacktrace: stacktrace.map(stack => {
@@ -262,18 +227,7 @@ module.exports = class Charlotte {
             ignored_at: null
         }
 
-        const stmtTrace = this.storage.prepare(`
-        INSERT INTO traceback (
-            type, message, file_location, node_executable,
-            node_version, created_at, fixed_at, ignored_at
-        ) VALUES (
-            :type, :message, :file_location, :node_executable,
-            :node_version, :created_at, :fixed_at, :ignored_at
-        )`)
-
-        const resultTrace = stmtTrace.run(traceback)
-
-        traceback.id = resultTrace.lastInsertRowid
+        traceback.id = this.storage.insertTraceback(traceback)
         traceback.stack = []
 
         exceptionTraceItems.forEach(trace => {
@@ -286,28 +240,9 @@ module.exports = class Charlotte {
                 created_at: new Date().getTime(),
                 traceback_id: traceback.id
             }
-
-            const stmtStack = this.storage.prepare(`
-            INSERT INTO stacktrace (
-                file_name, function_name, line_number,
-                column_number, source, created_at, traceback_id
-            ) VALUES (
-                :file_name, :function_name, :line_number,
-                :column_number, :source, :created_at, :traceback_id
-            )
-            `)
-
-            stmtStack.run(traceInfo)
+            this.storage.insertStacktrace(traceInfo)
             traceback.stack.push(traceInfo)
         })
-
-        const stmtRequest = this.storage.prepare(`
-        INSERT INTO request (
-            method, url, params, query, body, traceback_id
-        ) VALUES (
-            :method, :url, :params, :query, :body, :traceback_id
-        )
-        `)
 
         traceback.request = {
             method: this.koaContext.method.toUpperCase(),
@@ -317,8 +252,7 @@ module.exports = class Charlotte {
             body: JSON.stringify(this.koaContext.body),
             traceback_id: traceback.id
         }
-
-        stmtRequest.run(traceback.request)
+        this.storage.insertRequest(traceback.request)
 
         if (this.mail) {
             this.onMail(traceback)

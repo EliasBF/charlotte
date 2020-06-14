@@ -11,6 +11,10 @@ app.use(charlotte({
         pass: '',
         to: []
     },*/
+    storage: {
+        dialect: 'sqlite',
+        database: 'charlotte.db'
+    },
     onMail: (traceback) => {
         console.log('ON MAIL')
     }

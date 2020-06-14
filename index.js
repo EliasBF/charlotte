@@ -4,6 +4,7 @@ module.exports = (options) => {
     process.env.NODE_ENV = process.env.NODE_ENV || 'development'
     const charlotte = new Charlotte()
     charlotte.prepareMailing(options.mail, options.onMail)
+    charlotte.prepareStorage(options.storage)
 
     return async function charlotteMiddleware (ctx, next) {
         charlotte.startLog()
