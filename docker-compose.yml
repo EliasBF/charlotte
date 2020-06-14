@@ -1,0 +1,18 @@
+version: '3.1'
+
+services:
+    charlotte_node:
+        image: node:14
+        restart: always
+        container_name: charlotte_node
+        ports:
+            - 3000:3000
+        expose:
+            - "3000"
+        volumes:
+            - ./:/opt/charlotte
+        working_dir: /opt/charlotte
+        command: >
+            bash -c "npm install &&
+            npm run dev"
+
